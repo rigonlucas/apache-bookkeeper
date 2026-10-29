@@ -1,0 +1,54 @@
+services:
+  pulsar:
+    image: apachepulsar/pulsar:3.3.0
+    container_name: pulsar-bookkeeper
+    command: bin/pulsar standalone
+    environment:
+      # Configurações de memória para a PoC
+      - PULSAR_MEM=-Xms512m -Xmx1g -XX:MaxDirectMemorySize=1g
+      - PULSAR_PREFIX_allowAutoTopicCreationType=partitioned
+      - PULSAR_PREFIX_defaultNumPartitions=1
+    ports:
+      - "6650:6650"   # Pulsar binary protocol (Python client)
+      - "8080:8080"   # Pulsar Admin REST API
+      - "3181:3181"   # Apache BookKeeper Bookie port
+    healthcheck:
+      test: ["CMD-SHELL", "bin/pulsar-admin brokers healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  pulsar-manager-db:
+    image: postgres:15-alpine
+    container_name: pulsar-manager-db
+    environment:
+      POSTGRES_USER: pulsar
+      POSTGRES_PASSWORD: pulsar
+      POSTGRES_DB: pulsar_manager
+    volumes:
+      - ./init_db.sql:/docker-entrypoint-initdb.d/init_db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pulsar -d pulsar_manager"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  pulsar-manager:
+    image: apachepulsar/pulsar-manager:v0.4.0
+    container_name: pulsar-manager
+    depends_on:
+      pulsar:
+        condition: service_healthy
+      pulsar-manager-db:
+        condition: service_healthy
+    ports:
+      - "9527:9527"   # Interface Web do Pulsar Manager
+    environment:
+      REDIRECT_HOST: "http://localhost"
+      REDIRECT_PORT: "9527"
+      DRIVER_CLASS_NAME: "org.postgresql.Driver"
+      URL: "jdbc:postgresql://pulsar-manager-db:5432/pulsar_manager"
+      USERNAME: "pulsar"
+      PASSWORD: "pulsar"
+      LOG_LEVEL: "INFO"
